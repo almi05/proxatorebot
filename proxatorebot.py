@@ -17,7 +17,8 @@ BOT_TOKEN = 'ENTER_YOUR_TOKEN_HERE' # Remember to replace with your bot token fr
 INSTANCES = [
     'https://proxatore.almi.eu.org/',
     'https://proxatore.octt.eu.org/',
-    'https://laprovadialessioalmi.altervista.org/proxatore/index.php/'
+    'https://laprovadialessioalmi.altervista.org/proxatore/index.php/',
+    'https://octospacc.altervista.org/proxatore/'
 ]
 
 # Supported domains, if not there, the bot will not provide any proxatore URL
@@ -34,8 +35,40 @@ logging.basicConfig(level=logging.WARNING)
 # --- URL Cleaning ---
 def clean_url(url: str) -> str:
     url = re.sub(r'^https?://', '', url.strip())  # Removes http/https
-    url = url.split('?')[0]  # Removes anything after ? to avoid platorms trakers
-    return url
+    
+    # Special handling for YouTube URLs - preserve video ID parameter (but not for youtu.be)
+    if is_youtube_domain("https://" + url) and not url.startswith('youtu.be'):
+        # For YouTube (not youtu.be), we need to preserve the v= parameter but remove tracking parameters
+        if '?' in url:
+            base_url, params = url.split('?', 1)
+            # Extract only the v= parameter and remove other tracking parameters
+            video_id_match = re.search(r'v=([^&]+)', params)
+            if video_id_match:
+                return f"{base_url}?v={video_id_match.group(1)}"
+        return url
+    else:
+        # For other domains (including youtu.be), remove everything after ? to avoid platform trackers
+        url = url.split('?')[0]
+        return url
+
+# --- Check if domain is YouTube ---
+def is_youtube_domain(url: str) -> bool:
+    try:
+        parsed = urlparse(url if url.startswith('http') else 'https://' + url)
+        domain = parsed.netloc.lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain in ['youtube.com', 'm.youtube.com', 'youtu.be']
+    except:
+        return False
+
+# --- Build proxied URL with special YouTube handling ---
+def build_proxied_url(instance: str, original_url: str, cleaned_url: str) -> str:
+    base_url = f"{instance}{cleaned_url}"
+    if is_youtube_domain(original_url):
+        # Add YouTube-specific parameters
+        return f"{base_url}?&proxatore-htmlmedia=true&proxatore-mediaproxy=video"
+    return base_url
 
 # --- Verify domain ---
 def is_supported_domain(url: str) -> bool:
@@ -104,7 +137,7 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     results = []
     for instance in INSTANCES:
         domain = re.sub(r'^https?://', '', instance.strip('/'))
-        proxied_url = f"{instance}{cleaned}"
+        proxied_url = build_proxied_url(instance, query, cleaned)
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("Open original", url="https://" + cleaned)]
@@ -169,7 +202,7 @@ async def handle_instance_choice(update: Update, context: ContextTypes.DEFAULT_T
         return
 
     original, cleaned = user_links[user_id]
-    proxied_url = f"{instance}{cleaned}"
+    proxied_url = build_proxied_url(instance, original, cleaned)
 
     keyboard = InlineKeyboardMarkup([
         [
